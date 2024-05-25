@@ -11,11 +11,12 @@ import (
 	"strings"
 	"testing"
 
-	appconfig "github.com/cecobask/imdb-trakt-sync/pkg/config"
-	"github.com/cecobask/imdb-trakt-sync/pkg/entities"
-	"github.com/cecobask/imdb-trakt-sync/pkg/logger"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	appconfig "github.com/cecobask/imdb-trakt-sync/internal/config"
+	"github.com/cecobask/imdb-trakt-sync/internal/entities"
+	"github.com/cecobask/imdb-trakt-sync/pkg/logger"
 )
 
 func populateHttpResponseWithFileContents(w http.ResponseWriter, filename string) error {
@@ -143,7 +144,6 @@ func TestIMDbClient_ListGet(t *testing.T) {
 				assertions.Equal("Watched (2023)", list.ListName)
 				assertions.Equal(3, len(list.ListItems))
 				assertions.Equal(false, list.IsWatchlist)
-				assertions.Equal("watched-2023", list.TraktListSlug)
 			},
 		},
 		{
@@ -224,7 +224,6 @@ func TestIMDbClient_WatchlistGet(t *testing.T) {
 				assertions.Equal("WATCHLIST", list.ListName)
 				assertions.Equal(3, len(list.ListItems))
 				assertions.Equal(true, list.IsWatchlist)
-				assertions.Equal("watchlist", list.TraktListSlug)
 			},
 		},
 		{
@@ -539,7 +538,7 @@ func TestIMDbClient_WatchlistIDScrape(t *testing.T) {
 					requirements.Equal(http.MethodGet, r.Method)
 					requirements.Equal(imdbPathWatchlist, r.URL.Path)
 					w.WriteHeader(http.StatusOK)
-					bytes, err := w.Write([]byte(`<meta property="pageId" content="ls123456789">`))
+					bytes, err := w.Write([]byte(`<a data-testid="hero-list-subnav-edit-button" href="/list/ls123456789/edit">Edit</a>`))
 					requirements.Greater(bytes, 0)
 					requirements.NoError(err)
 				}
@@ -567,12 +566,30 @@ func TestIMDbClient_WatchlistIDScrape(t *testing.T) {
 			},
 		},
 		{
-			name: "fail to scrape watchlist id",
+			name: "fail to scrape watchlist href",
 			requirements: func(requirements *require.Assertions) *httptest.Server {
 				handler := func(w http.ResponseWriter, r *http.Request) {
 					requirements.Equal(http.MethodGet, r.Method)
 					requirements.Equal(imdbPathWatchlist, r.URL.Path)
 					w.WriteHeader(http.StatusOK)
+				}
+				return httptest.NewServer(http.HandlerFunc(handler))
+			},
+			assertions: func(assertions *assert.Assertions, c *IMDbClient, err error) {
+				assertions.Zero(c.config.watchlistID)
+				assertions.Error(err)
+			},
+		},
+		{
+			name: "fail to scrape watchlist id from invalid href",
+			requirements: func(requirements *require.Assertions) *httptest.Server {
+				handler := func(w http.ResponseWriter, r *http.Request) {
+					requirements.Equal(http.MethodGet, r.Method)
+					requirements.Equal(imdbPathWatchlist, r.URL.Path)
+					w.WriteHeader(http.StatusOK)
+					bytes, err := w.Write([]byte(`<a data-testid="hero-list-subnav-edit-button" href="/list">Edit</a>`))
+					requirements.Greater(bytes, 0)
+					requirements.NoError(err)
 				}
 				return httptest.NewServer(http.HandlerFunc(handler))
 			},
@@ -689,7 +706,6 @@ func Test_readIMDbListResponse(t *testing.T) {
 				assertions.Equal("Watched (2023)", list.ListName)
 				assertions.Equal(3, len(list.ListItems))
 				assertions.Equal(false, list.IsWatchlist)
-				assertions.Equal("watched-2023", list.TraktListSlug)
 			},
 		},
 		{
@@ -810,7 +826,7 @@ func TestIMDbClient_Hydrate(t *testing.T) {
 				watchlistHandler := func(w http.ResponseWriter, r *http.Request) {
 					requirements.Equal(http.MethodGet, r.Method)
 					w.WriteHeader(http.StatusOK)
-					bytes, err := w.Write([]byte(`<meta property="pageId" content="ls123456789">`))
+					bytes, err := w.Write([]byte(`<a data-testid="hero-list-subnav-edit-button" href="/list/ls123456789/edit">Edit</a>`))
 					requirements.Greater(bytes, 0)
 					requirements.NoError(err)
 				}

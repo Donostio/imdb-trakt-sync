@@ -9,15 +9,15 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-	appconfig "github.com/cecobask/imdb-trakt-sync/pkg/config"
-	"github.com/cecobask/imdb-trakt-sync/pkg/entities"
+
+	appconfig "github.com/cecobask/imdb-trakt-sync/internal/config"
+	"github.com/cecobask/imdb-trakt-sync/internal/entities"
 	"github.com/cecobask/imdb-trakt-sync/pkg/logger"
 )
 
@@ -102,6 +102,7 @@ func (c *IMDbClient) doRequest(requestFields requestFields) (*http.Response, err
 	if err != nil {
 		return nil, fmt.Errorf("failure creating http request %s %s: %w", requestFields.Method, requestFields.BasePath+requestFields.Endpoint, err)
 	}
+	request.Header.Set("User-Agent", "PostmanRuntime/7.37.3") // workaround for https://github.com/cecobask/imdb-trakt-sync/issues/33
 	response, err := c.client.Do(request)
 	if err != nil {
 		return nil, fmt.Errorf("failure sending http request %s %s: %w", request.Method, request.URL, err)
@@ -200,7 +201,6 @@ func (c *IMDbClient) ListsGet(listIDs []string) ([]entities.IMDbList, error) {
 					errChan <- fmt.Errorf("unexpected error while fetching imdb lists: %w", err)
 					return
 				}
-				imdbList.TraktListSlug = buildTraktListSlug(imdbList.ListName)
 				outChan <- *imdbList
 			}(listID)
 		}
@@ -247,11 +247,15 @@ func (c *IMDbClient) WatchlistIDScrape() error {
 	if err != nil {
 		return err
 	}
-	watchlistID, err := scrapeSelectionAttribute(response.Body, clientNameIMDb, "meta[property='pageId']", "content")
+	href, err := scrapeSelectionAttribute(response.Body, clientNameIMDb, "a[data-testid='hero-list-subnav-edit-button']", "href")
 	if err != nil {
-		return fmt.Errorf("imdb watchlist id not found: %w", err)
+		return fmt.Errorf("imdb watchlist href not found: %w", err)
 	}
-	c.config.watchlistID = *watchlistID
+	hrefParts := strings.Split(*href, "/")
+	if len(hrefParts) < 3 {
+		return fmt.Errorf("imdb watchlist href has unexpected format: %s", *href)
+	}
+	c.config.watchlistID = hrefParts[2]
 	return nil
 }
 
@@ -296,10 +300,9 @@ func readIMDbListResponse(response *http.Response, listID string) (*entities.IMD
 	}
 	listName := strings.Split(params["filename"], ".")[0]
 	return &entities.IMDbList{
-		ListName:      listName,
-		ListID:        listID,
-		ListItems:     listItems,
-		TraktListSlug: buildTraktListSlug(listName),
+		ListName:  listName,
+		ListID:    listID,
+		ListItems: listItems,
 	}, nil
 }
 
@@ -319,7 +322,7 @@ func readIMDbRatingsResponse(response *http.Response) ([]entities.IMDbItem, erro
 			if err != nil {
 				return nil, fmt.Errorf("failure parsing imdb rating value to integer: %w", err)
 			}
-			ratingDate, err := time.Parse("2006-01-02", record[2])
+			ratingDate, err := time.Parse(time.DateOnly, record[2])
 			if err != nil {
 				return nil, fmt.Errorf("failure parsing imdb rating date: %w", err)
 			}
@@ -332,21 +335,4 @@ func readIMDbRatingsResponse(response *http.Response) ([]entities.IMDbItem, erro
 		}
 	}
 	return ratings, nil
-}
-
-func buildTraktListSlug(imdbListName string) string {
-	result := strings.ToLower(strings.Join(strings.Fields(imdbListName), "-"))
-	regex := regexp.MustCompile(`[^-_a-z0-9]+`)
-	result = removeDuplicateAdjacentCharacters(regex.ReplaceAllString(result, ""), '-')
-	return result
-}
-
-func removeDuplicateAdjacentCharacters(value string, target rune) string {
-	var sb strings.Builder
-	for i, char := range value {
-		if i == 0 || char != target || rune(value[i-1]) != target {
-			sb.WriteRune(char)
-		}
-	}
-	return sb.String()
 }
