@@ -31,7 +31,7 @@ IMDB:
     # For local debugging you can set this value to false
     # If running via GitHub Actions or other CI the value will always be true
     HEADLESS: true
-SYNC:
+SYNC: full
     # Sync mode to be used when running the application
     # The value must be one of the following:
     #   full     - add Trakt items that do not exist, delete Trakt items that do not exist on IMDb, update Trakt items by treating IMDb as the source of truth
